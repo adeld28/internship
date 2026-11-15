@@ -69,6 +69,53 @@ def fetch_workable(firm):
             for j in r.json().get("jobs", [])]
 
 
+def fetch_workday(firm):
+    """Workday career sites (most big companies). Config: {"ats": "workday", "url": <careers URL>}, e.g.
+    https://pg.wd5.myworkdayjobs.com/1000 -> POSTs to /wday/cxs/<tenant>/<site>/jobs. Searches "intern"
+    server-side (override with "search") so we page through tens of postings, not thousands."""
+    m = re.match(r"https?://(([^./]+)\.wd\d+\.myworkdayjobs\.com)/(?:[a-z]{2}-[A-Z]{2}/)?([^/?#]+)", firm["url"])
+    if not m: raise ValueError(f"not a myworkdayjobs.com URL: {firm['url']}")
+    host, tenant, site = m.groups()
+    api, hdrs = f"https://{host}/wday/cxs/{tenant}/{site}/jobs", {**HEADERS, "Content-Type": "application/json"}
+    body = {"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": firm.get("search", "intern")}
+    # Use Workday's own facets where the site has them:
+    #  - country: global companies list jobs by bare city ("Moscow"), which location filters can't catch.
+    #    Set "country": "" on a firm to disable.
+    #  - job type: an "Intern/Co-op" value beats searching "intern", which also matches "Internal Controls"
+    #    and pushes real internships past the page cap on big boards.
+    country = firm.get("country", "United States of America")
+    r = requests.post(api, json={**body, "limit": 1}, headers=hdrs, timeout=TIMEOUT); r.raise_for_status()
+    flat = []
+    def walk(facets):
+        for fc in facets or []:
+            for v in fc.get("values") or []:
+                walk([v]) if "values" in v else flat.append((fc.get("facetParameter") or "", v))
+    walk(r.json().get("facets"))
+    applied = {}
+    for param, v in flat:
+        if country and v.get("descriptor") == country: applied[param] = [v["id"]]
+    intern_vals = {}
+    for param, v in flat:
+        if "location" not in param.lower() and re.search(r"\bintern|co-?op\b|\bstudent", str(v.get("descriptor")).lower()):
+            intern_vals.setdefault(param, []).append(v)
+    if intern_vals:  # pick the one facet whose intern-ish values cover the most postings
+        param, vals = max(intern_vals.items(), key=lambda kv: sum(v.get("count") or 0 for v in kv[1]))
+        applied[param] = [v["id"] for v in vals]; body["searchText"] = firm.get("search", "")
+    body["appliedFacets"] = applied
+    out, offset, total = [], 0, None
+    while offset < 400:
+        r = requests.post(api, json={**body, "offset": offset}, headers=hdrs, timeout=TIMEOUT)
+        r.raise_for_status(); d = r.json(); posts = d.get("jobPostings") or []
+        if total is None: total = d.get("total") or 0  # Workday only reports total on the first page
+        for j in posts:
+            path = j.get("externalPath") or ""
+            out.append({"id": path.rsplit("_", 1)[-1] or path, "title": j.get("title") or "",
+                        "location": j.get("locationsText") or "", "url": f"https://{host}/en-US/{site}{path}", "content": ""})
+        offset += 20
+        if len(posts) < 20 or offset >= total: break
+    return out
+
+
 def fetch_github_json(firm):
     """Community tracker repos that publish listings.json (SimplifyJobs / vanshb03
     family). One source = hundreds of companies. `cycle_year` is injected so
@@ -91,7 +138,7 @@ def fetch_github_json(firm):
 
 
 FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch_ashby,
-            "workable": fetch_workable, "github_json": fetch_github_json}
+            "workable": fetch_workable, "workday": fetch_workday, "github_json": fetch_github_json}
 
 
 # --------------------------------- filters ---------------------------------- #
@@ -183,7 +230,7 @@ def main():
         except Exception as e:  # one dead board never kills the run
             print(f"  x {firm.get('name')} skipped: {e}"); return firm, []
 
-    with ThreadPoolExecutor(max_workers=12) as pool:  # keep this parallel; 200 boards serially takes an hour
+    with ThreadPoolExecutor(max_workers=16) as pool:  # keep this parallel; 200 boards serially takes an hour
         results = list(pool.map(poll, firms))
     for firm, jobs in results:
         rel = [j for j in jobs if is_relevant(j, f)]
