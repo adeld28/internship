@@ -9,11 +9,11 @@ The user gives a job-posting URL or pasted JD as: $ARGUMENTS
    used, tagged verified / needs-confirming / never-use) and `applications.md` (my tracker).
    Rules: NEVER invent metrics or claims. If a preferred qual is almost-true, tell me the
    small task that would make it true instead of writing it. No em-dashes. Plain human voice.
-3. **Pick the base** `resumes/base/<lane>.tex` (e.g. supplychain.tex vs consulting.tex).
+3. **Pick the base** `resumes/base/<lane>.tex` (currently only `ise.tex`; add lanes like consulting.tex later).
 4. **Tailor with minimal edits**: reorder / bold / swap bullets from the bank, don't rewrite.
    Cover every truthfully-claimable preferred qualification and **bold** those phrases.
    Save as `resumes/out/<Company>/<Lastname>_<First>_<Company>.tex`. Never overwrite a base.
-5. **Compile** with `tectonic <file>.tex` (Windows: `winget install tectonic` or `scoop install tectonic`).
+5. **Compile** with `C:/Users/Adel/tools/tectonic/tectonic.exe <file>.tex` (Tectonic 0.17.0, not on PATH).
    Must be exactly 1 page, no overfull lines. Fix and recompile until clean.
    Reveal the PDF in File Explorer (`explorer /select,<path-to-pdf>`).
 6. **Coverage table**: each JD requirement -> where the resume now addresses it, or "gap".
